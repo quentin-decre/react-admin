@@ -63,34 +63,44 @@ export const DatagridConfigurable = ({
 
     React.useEffect(() => {
         // first render, or the preference have been cleared
-        const newAvailableColumns = React.Children.toArray(props.children)
+        const newAvailableColumns: ConfigurableDatagridColumn[] = React.Children.toArray(
+            props.children
+        )
             .filter(child => React.isValidElement(child))
-            .map((child: React.ReactElement, index) => ({
-                index: String(index),
-                source: child.props.source,
-                label:
-                    child.props.label && typeof child.props.label === 'string' // this list is serializable, so we can't store ReactElement in it
-                        ? child.props.label
-                        : child.props.source
-                          ? //  force the label to be the source
-                            undefined
-                          : // no source or label, generate a label
-                            translate('ra.configurable.Datagrid.unlabeled', {
-                                column: index,
-                                _: `Unlabeled column #%{column}`,
-                            }),
-            }));
-        const hasChanged = newAvailableColumns.some(column => {
+            .map((child: React.ReactElement, index) => {
+                return {
+                    index: String(index),
+                    source: child.props.source,
+                    label:
+                        child.props.label &&
+                        typeof child.props.label === 'string' // this list is serializable, so we can't store ReactElement in it
+                            ? child.props.label
+                            : child.props.label?.props?.label &&
+                              typeof child.props.label.props.label === 'string'
+                            ? child.props.label.props.label
+                            : child.props.source
+                            ? //  force the label to be the source
+                              undefined
+                            : // no source or label, generate a label
+                              translate('ra.configurable.Datagrid.unlabeled', {
+                                  column: index,
+                                  _: `Unlabeled column #%{column}`,
+                              }),
+                };
+            });
+
+        const changedColumns = newAvailableColumns.filter(column => {
             const availableColumn = availableColumns.find(
                 availableColumn =>
                     (!!availableColumn.source &&
-                        availableColumn.source === column?.source) ||
-                    (!!availableColumn.label &&
-                        availableColumn.label === column?.label)
+                        availableColumn.source === column.source) ||
+                    (!availableColumn.source &&
+                        !!availableColumn.label &&
+                        availableColumn.label === column.label)
             );
             return !availableColumn || availableColumn.index !== column.index;
         });
-        if (hasChanged) {
+        if (changedColumns.length > 0) {
             // first we need to update the columns indexes to match the new availableColumns so we keep the same order
             const newColumnsSortedAsOldColumns = columns.flatMap(column => {
                 const oldColumn = availableColumns.find(
@@ -100,26 +110,32 @@ export const DatagridConfigurable = ({
                     availableColumn =>
                         (!!availableColumn.source &&
                             availableColumn.source === oldColumn?.source) ||
-                        (!!availableColumn.label &&
+                        (!availableColumn.source &&
+                            !!availableColumn.label &&
                             availableColumn.label === oldColumn?.label)
                 );
                 return newColumn?.index ? [newColumn.index] : [];
             });
-            setColumns([
+            const newColumns = [
                 // we add the old columns in the same order as before
                 ...newColumnsSortedAsOldColumns,
                 // then we add at the new columns which are not omited
                 ...newAvailableColumns
                     .filter(
                         c =>
-                            !availableColumns.some(
+                            (!availableColumns.some(
                                 ac =>
                                     (!!ac.source && ac.source === c.source) ||
-                                    (!!ac.label && ac.label === c.label)
-                            ) && !omit?.includes(c.source as string)
+                                    (!ac.source &&
+                                        !!ac.label &&
+                                        ac.label === c.label)
+                            ) ||
+                                newColumnsSortedAsOldColumns?.length === 0) &&
+                            !omit?.includes(c.source as string)
                     )
                     .map(c => c.index),
-            ]);
+            ];
+            setColumns(newColumns);
 
             // Then we update the available columns to include the new columns while keeping the same order as before
             const newAvailableColumnsSortedAsBefore = [
@@ -130,7 +146,8 @@ export const DatagridConfigurable = ({
                             c =>
                                 (!!c.source &&
                                     c.source === oldAvailableColumn.source) ||
-                                (!!c.label &&
+                                (!c.source &&
+                                    !!c.label &&
                                     c.label === oldAvailableColumn.label)
                         )
                     )
@@ -139,11 +156,11 @@ export const DatagridConfigurable = ({
                 ...newAvailableColumns.filter(
                     c =>
                         !availableColumns.some(
-                            oldAvailableColumn =>
-                                (!!oldAvailableColumn.source &&
-                                    oldAvailableColumn.source === c.source) ||
-                                (!!oldAvailableColumn.label &&
-                                    oldAvailableColumn.label === c.label)
+                            ac =>
+                                (!!ac.source && ac.source === c.source) ||
+                                (!c.source &&
+                                    !!ac.label &&
+                                    ac.label === c.label)
                         )
                 ),
             ];
@@ -151,6 +168,17 @@ export const DatagridConfigurable = ({
             setOmit(omit);
         }
     }, [availableColumns]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Reset to default columns when columns is empty
+    React.useEffect(() => {
+        if (columns?.length === 0 && availableColumns?.length > 0) {
+            setColumns(
+                availableColumns
+                    .filter(column => !omit?.includes(column.source ?? ''))
+                    .map(column => column.index)
+            );
+        }
+    }, [omit, availableColumns, columns]);
 
     return (
         <Configurable
